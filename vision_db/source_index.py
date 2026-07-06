@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Literal, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 from PIL import Image
 
@@ -11,6 +11,7 @@ class SourceImageRecord(TypedDict):
     width: int
     height: int
     file_size: int
+    error: NotRequired[str]
 
 
 def parse_template_label(path: Path) -> tuple[str, str, str]:
@@ -25,11 +26,27 @@ def scan_source_images(source_dir: Path) -> list[SourceImageRecord]:
         if not path.is_file():
             continue
 
-        with Image.open(path) as image:
-            width, height = image.size
-
         kind: Literal["template_seed", "full_screenshot"]
         kind = "template_seed" if path.name.endswith("_raw.png") else "full_screenshot"
+        file_size = path.stat().st_size
+
+        try:
+            with Image.open(path) as image:
+                width, height = image.size
+        except OSError as exc:
+            records.append(
+                {
+                    "file_name": path.name,
+                    "source_path": str(path),
+                    "kind": kind,
+                    "width": 0,
+                    "height": 0,
+                    "file_size": file_size,
+                    "error": str(exc),
+                }
+            )
+            continue
+
         records.append(
             {
                 "file_name": path.name,
@@ -37,7 +54,7 @@ def scan_source_images(source_dir: Path) -> list[SourceImageRecord]:
                 "kind": kind,
                 "width": width,
                 "height": height,
-                "file_size": path.stat().st_size,
+                "file_size": file_size,
             }
         )
 
