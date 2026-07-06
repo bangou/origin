@@ -1,0 +1,12 @@
+.venv/
+.pytest_cache/
+__pycache__/
+*.pyc
+
+screenshots/
+
+data/vision_db/raw_full/
+data/vision_db/compressed_full/
+data/vision_db/exports/
+
+logs/

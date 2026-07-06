@@ -1,0 +1,12 @@
+capture:
+  method: "mock"
+  fps: 20
+  roi: {}
+
+engine:
+  mode: "python_binding"
+  data_path: "./engine/data/"
+  index_file: "./engine/data/index.bin"
+
+ui:
+  mode: "console"
