@@ -55,3 +55,26 @@ def test_normalize_capture_supports_fullscreen_and_work_area_variants() -> None:
     assert normalized_fullscreen.image.getpixel((10, 1031)) == (0, 139, 116)
     assert normalized_work_area.image.size == (1920, 1032)
     assert normalized_work_area.variant_name == "work_area_1920x1032"
+
+
+def test_detect_community_cards_skips_missing_turn_and_river() -> None:
+    image = Image.new("RGB", (1920, 1032), "#008b74")
+    draw = ImageDraw.Draw(image)
+    profile = make_seed_profile()
+
+    for box in [
+        (829, 476, 50, 73),
+        (882, 476, 50, 73),
+        (936, 476, 49, 73),
+    ]:
+        x, y, width, height = box
+        draw.rectangle((x, y, x + width - 1, y + height - 1), fill="white")
+
+    community = detect_community_cards(image, profile)
+
+    assert [crop.card_slot for crop in community] == ["flop_1", "flop_2", "flop_3"]
+    assert [crop.bbox for crop in community] == [
+        (829, 476, 50, 73),
+        (882, 476, 50, 73),
+        (936, 476, 49, 73),
+    ]

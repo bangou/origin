@@ -32,7 +32,7 @@ def make_seed_profile() -> VisionProfile:
         reference_height=1080,
         bbox_tolerance_px=5,
         hero_hand_roi=(897, 862, 125, 94),
-        hero_card_boxes=((908, 872, 50, 73), (967, 872, 46, 73)),
+        hero_card_boxes=((908, 872, 50, 73), (963, 872, 50, 73)),
         community_search_roi=(805, 457, 318, 109),
         community_card_boxes=(
             (829, 476, 50, 73),

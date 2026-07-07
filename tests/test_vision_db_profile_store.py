@@ -23,6 +23,7 @@ def test_seed_profile_round_trips_and_editor_updates_boxes(tmp_path: Path) -> No
     assert loaded.community_search_roi == (805, 457, 318, 109)
     assert updated.hero_card_boxes[0] == (910, 874, 50, 73)
     assert updated.button_rois["bet_button_roi"] == (922, 783, 80, 80)
+    assert seed.hero_card_boxes[1] == (963, 872, 50, 73)
 
 
 def test_profile_editor_script_runs_via_python_command() -> None:
