@@ -4,11 +4,10 @@ import mimetypes
 import shutil
 import sys
 import webbrowser
-from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Sequence
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -41,25 +40,25 @@ HTML_PAGE = """<!doctype html>
     }
     .app {
       display: grid;
-      grid-template-columns: 300px 1fr;
+      grid-template-columns: 320px 1fr;
       min-height: 100vh;
     }
     .sidebar {
       border-right: 1px solid var(--line);
-      background: rgba(14, 21, 19, 0.88);
+      background: rgba(14, 21, 19, 0.9);
       padding: 18px;
       overflow: auto;
     }
     .main {
       padding: 18px;
       display: grid;
-      grid-template-rows: auto auto 1fr auto;
+      grid-template-rows: auto auto auto 1fr auto;
       gap: 14px;
     }
     h1, h2, h3, p { margin: 0; }
     .muted { color: var(--muted); }
     .panel {
-      background: rgba(22, 33, 29, 0.92);
+      background: rgba(22, 33, 29, 0.94);
       border: 1px solid var(--line);
       border-radius: 14px;
       padding: 14px;
@@ -89,7 +88,10 @@ HTML_PAGE = """<!doctype html>
       padding: 10px 12px;
       cursor: pointer;
     }
-    .item-button.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+    .item-button.active {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px var(--accent) inset;
+    }
     .status-chip {
       display: inline-block;
       min-width: 78px;
@@ -139,8 +141,9 @@ HTML_PAGE = """<!doctype html>
       display: flex;
       gap: 10px;
       flex-wrap: wrap;
+      align-items: center;
     }
-    button, input {
+    button, input, select {
       font: inherit;
     }
     button.action {
@@ -154,7 +157,7 @@ HTML_PAGE = """<!doctype html>
     button.primary { background: #1e3b30; border-color: #2c5d49; }
     button.warn { background: #3d3321; border-color: #7f6434; }
     button.danger { background: #3b2323; border-color: #7b4141; }
-    input[type="text"] {
+    input[type="text"], select {
       width: 100%;
       background: #0f1714;
       border: 1px solid var(--line);
@@ -169,16 +172,33 @@ HTML_PAGE = """<!doctype html>
       align-items: center;
       flex-wrap: wrap;
     }
+    .control-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .control-label {
+      margin-bottom: 6px;
+      color: var(--muted);
+    }
     pre {
       white-space: pre-wrap;
       word-break: break-word;
       margin: 0;
       color: var(--muted);
     }
+    .legend {
+      line-height: 1.7;
+      color: var(--muted);
+    }
+    .legend strong {
+      color: var(--text);
+    }
     @media (max-width: 1080px) {
       .app { grid-template-columns: 1fr; }
       .viewer { grid-template-columns: 1fr; }
       .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .control-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -197,9 +217,39 @@ HTML_PAGE = """<!doctype html>
           <div class="stat"><div class="muted">拒绝</div><div id="statRejected"></div></div>
         </div>
       </div>
+      <div class="panel" style="margin-top:14px;">
+        <h3>牌面说明</h3>
+        <div class="legend" style="margin-top:10px;">
+          <div><strong>s</strong> = spades = 黑桃</div>
+          <div><strong>h</strong> = hearts = 红桃</div>
+          <div><strong>c</strong> = clubs = 梅花</div>
+          <div><strong>d</strong> = diamonds = 方块</div>
+          <div style="margin-top:8px;">例子：<strong>Ah</strong> = A红桃，<strong>8s</strong> = 8黑桃</div>
+        </div>
+      </div>
       <div class="item-list" id="itemList"></div>
     </aside>
     <main class="main">
+      <div class="panel">
+        <div class="control-grid">
+          <div>
+            <div class="control-label">批次切换</div>
+            <div class="toolbar">
+              <button class="action" id="prevBatchButton">上一个批次</button>
+              <button class="action" id="nextBatchButton">下一个批次</button>
+            </div>
+            <select id="batchSelect" style="margin-top:10px;"></select>
+          </div>
+          <div>
+            <div class="control-label">截图切换</div>
+            <div class="toolbar">
+              <button class="action" id="prevImageButton">上一张截图</button>
+              <button class="action" id="nextImageButton">下一张截图</button>
+            </div>
+            <select id="imageSelect" style="margin-top:10px;"></select>
+          </div>
+        </div>
+      </div>
       <div class="panel">
         <div class="footer">
           <div>
@@ -238,16 +288,24 @@ HTML_PAGE = """<!doctype html>
         </div>
       </div>
       <div class="panel footer">
-        <div id="message" class="muted">键盘：← → 切换，A 通过，C 修正，R 拒绝</div>
+        <div id="message" class="muted">键盘：← → 切条目，A 通过，C 修正，R 拒绝</div>
         <div class="toolbar">
-          <button class="action" id="prevButton">上一张</button>
-          <button class="action" id="nextButton">下一张</button>
+          <button class="action" id="prevButton">上一条</button>
+          <button class="action" id="nextButton">下一条</button>
         </div>
       </div>
     </main>
   </div>
   <script>
-    const state = { rows: [], index: 0, batchPath: "", summary: {} };
+    const state = {
+      rows: [],
+      index: 0,
+      batchPath: "",
+      batches: [],
+      batchId: "",
+      imageIds: [],
+      imageId: "",
+    };
 
     function statusLabel(status) {
       return {
@@ -285,6 +343,35 @@ HTML_PAGE = """<!doctype html>
       return summary;
     }
 
+    function stepValue(values, current, delta) {
+      if (!values.length) return "";
+      const currentIndex = Math.max(0, values.indexOf(current));
+      const nextIndex = Math.max(0, Math.min(values.length - 1, currentIndex + delta));
+      return values[nextIndex];
+    }
+
+    function renderSelectors() {
+      const batchSelect = document.getElementById("batchSelect");
+      batchSelect.innerHTML = "";
+      for (const batch of state.batches) {
+        const option = document.createElement("option");
+        option.value = batch.batch_id;
+        option.textContent = `${batch.batch_id} (${batch.row_count})`;
+        option.selected = batch.batch_id === state.batchId;
+        batchSelect.appendChild(option);
+      }
+
+      const imageSelect = document.getElementById("imageSelect");
+      imageSelect.innerHTML = "";
+      for (const imageId of state.imageIds) {
+        const option = document.createElement("option");
+        option.value = imageId;
+        option.textContent = imageId;
+        option.selected = imageId === state.imageId;
+        imageSelect.appendChild(option);
+      }
+    }
+
     function renderList() {
       const list = document.getElementById("itemList");
       list.innerHTML = "";
@@ -306,8 +393,7 @@ HTML_PAGE = """<!doctype html>
       });
     }
 
-    function renderStats() {
-      const summary = summarizeRows(state.rows);
+    function renderStats(summary) {
       document.getElementById("statTotal").textContent = summary.total;
       document.getElementById("statPending").textContent = summary.pending;
       document.getElementById("statNeedsReview").textContent = summary.needs_review;
@@ -317,13 +403,24 @@ HTML_PAGE = """<!doctype html>
     }
 
     function render() {
-      renderStats();
+      renderSelectors();
+      renderStats(summarizeRows(state.rows));
       renderList();
       document.getElementById("batchPath").textContent = state.batchPath;
       if (!state.rows.length) {
-        document.getElementById("title").textContent = "没有条目";
+        document.getElementById("title").textContent = "当前截图没有条目";
+        document.getElementById("subtitle").textContent = state.imageId ? `image_id = ${state.imageId}` : "";
+        document.getElementById("statusChip").textContent = "";
+        document.getElementById("cropImage").src = "";
+        document.getElementById("overlayImage").src = "";
+        document.getElementById("candidateLabel").textContent = "";
+        document.getElementById("candidateScore").textContent = "";
+        document.getElementById("bboxText").textContent = "";
+        document.getElementById("actionHints").textContent = "";
+        document.getElementById("finalLabelInput").value = "";
         return;
       }
+
       const row = state.rows[state.index];
       document.getElementById("title").textContent = `${state.index + 1}/${state.rows.length} ${row.card_slot}`;
       document.getElementById("subtitle").textContent = `${row.image_id} · ${row.review_item_id}`;
@@ -343,7 +440,7 @@ HTML_PAGE = """<!doctype html>
       const response = await fetch("/api/save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows: state.rows }),
+        body: JSON.stringify({ batch_id: state.batchId, rows: state.rows }),
       });
       if (!response.ok) {
         throw new Error(await response.text());
@@ -385,15 +482,63 @@ HTML_PAGE = """<!doctype html>
       await saveRows(`已保存 ${row.card_slot} 的文本修改`);
     }
 
-    async function loadQueue() {
-      const response = await fetch("/api/queue");
+    async function loadBatches() {
+      const response = await fetch("/api/batches");
       const payload = await response.json();
-      state.rows = payload.rows;
-      state.batchPath = payload.batch_dir;
-      state.index = clampIndex(state.index);
+      state.batches = payload.batches;
+      if (!state.batchId && state.batches.length) {
+        state.batchId = state.batches[0].batch_id;
+      }
+    }
+
+    async function loadQueue() {
+      const query = new URLSearchParams();
+      if (state.batchId) query.set("batch_id", state.batchId);
+      if (state.imageId) query.set("image_id", state.imageId);
+      const response = await fetch(`/api/queue?${query.toString()}`);
+      const payload = await response.json();
+      state.batchId = payload.selected_batch_id || state.batchId;
+      state.batchPath = payload.batch_dir || "";
+      state.imageIds = payload.image_ids || [];
+      state.imageId = payload.selected_image_id || state.imageIds[0] || "";
+      state.rows = payload.rows || [];
+      state.index = clampIndex(0);
       render();
     }
 
+    async function changeBatch(batchId) {
+      state.batchId = batchId;
+      state.imageId = "";
+      await loadQueue();
+    }
+
+    async function changeImage(imageId) {
+      state.imageId = imageId;
+      await loadQueue();
+    }
+
+    document.getElementById("batchSelect").addEventListener("change", (event) => {
+      changeBatch(event.target.value);
+    });
+    document.getElementById("imageSelect").addEventListener("change", (event) => {
+      changeImage(event.target.value);
+    });
+    document.getElementById("prevBatchButton").addEventListener("click", () => {
+      const next = stepValue(state.batches.map((item) => item.batch_id), state.batchId, -1);
+      changeBatch(next);
+    });
+    document.getElementById("nextBatchButton").addEventListener("click", () => {
+      const next = stepValue(state.batches.map((item) => item.batch_id), state.batchId, 1);
+      changeBatch(next);
+    });
+    document.getElementById("prevImageButton").addEventListener("click", () => {
+      const next = stepValue(state.imageIds, state.imageId, -1);
+      changeImage(next);
+    });
+    document.getElementById("nextImageButton").addEventListener("click", () => {
+      const next = stepValue(state.imageIds, state.imageId, 1);
+      changeImage(next);
+    });
     document.getElementById("approveButton").addEventListener("click", () => applyStatus("approved"));
     document.getElementById("correctButton").addEventListener("click", () => applyStatus("corrected"));
     document.getElementById("rejectButton").addEventListener("click", () => applyStatus("rejected"));
@@ -429,7 +574,14 @@ HTML_PAGE = """<!doctype html>
       }
     });
 
-    loadQueue().catch((error) => setMessage(String(error)));
+    (async () => {
+      try {
+        await loadBatches();
+        await loadQueue();
+      } catch (error) {
+        setMessage(String(error));
+      }
+    })();
   </script>
 </body>
 </html>
@@ -446,19 +598,33 @@ def _load_jsonl(path: Path) -> list[dict[str, Any]]:
     ]
 
 
-def load_review_queue(batch_dir: Path) -> list[dict[str, Any]]:
-    return _load_jsonl(batch_dir / "review_queue.jsonl")
+def _unique_in_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        ordered.append(value)
+    return ordered
 
 
-def save_review_queue(batch_dir: Path, rows: list[dict[str, Any]]) -> None:
-    queue_path = batch_dir / "review_queue.jsonl"
-    backup_path = batch_dir / "review_queue.backup.jsonl"
-    if queue_path.exists() and not backup_path.exists():
-        shutil.copy2(queue_path, backup_path)
-    queue_path.write_text(
-        "\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n",
-        encoding="utf-8",
-    )
+def list_review_batches(batch_root: Path) -> list[dict[str, Any]]:
+    batches: list[dict[str, Any]] = []
+    if not batch_root.exists():
+        return batches
+    for path in sorted(item for item in batch_root.iterdir() if item.is_dir()):
+        rows = _load_jsonl(path / "review_queue.jsonl")
+        image_ids = _unique_in_order([str(row["image_id"]) for row in rows if "image_id" in row])
+        batches.append(
+            {
+                "batch_id": path.name,
+                "row_count": len(rows),
+                "image_count": len(image_ids),
+                "path": str(path),
+            }
+        )
+    return batches
 
 
 def _summary(rows: list[dict[str, Any]]) -> dict[str, int]:
@@ -477,26 +643,82 @@ def _summary(rows: list[dict[str, Any]]) -> dict[str, int]:
     return summary
 
 
-def build_review_payload(batch_dir: Path) -> dict[str, Any]:
-    rows = []
-    for row in load_review_queue(batch_dir):
+def _batch_dir(batch_root: Path, batch_id: str) -> Path:
+    candidate = (batch_root / batch_id).resolve()
+    candidate.relative_to(batch_root.resolve())
+    return candidate
+
+
+def load_review_queue(batch_dir: Path) -> list[dict[str, Any]]:
+    return _load_jsonl(batch_dir / "review_queue.jsonl")
+
+
+def save_review_queue(batch_dir: Path, rows: list[dict[str, Any]]) -> None:
+    queue_path = batch_dir / "review_queue.jsonl"
+    backup_path = batch_dir / "review_queue.backup.jsonl"
+    if queue_path.exists() and not backup_path.exists():
+        shutil.copy2(queue_path, backup_path)
+    queue_path.write_text(
+        "\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n",
+        encoding="utf-8",
+    )
+
+
+def build_review_payload(
+    batch_root: Path,
+    batch_id: str | None = None,
+    image_id: str | None = None,
+) -> dict[str, Any]:
+    batches = list_review_batches(batch_root)
+    if not batches:
+        return {
+            "batch_dir": "",
+            "batches": [],
+            "selected_batch_id": "",
+            "image_ids": [],
+            "selected_image_id": "",
+            "rows": [],
+            "summary": _summary([]),
+        }
+
+    selected_batch_id = batch_id or batches[0]["batch_id"]
+    batch_dir = _batch_dir(batch_root, selected_batch_id)
+    all_rows = load_review_queue(batch_dir)
+    image_ids = _unique_in_order([str(row["image_id"]) for row in all_rows if "image_id" in row])
+    selected_image_id = image_id or (image_ids[0] if image_ids else "")
+    filtered_rows = [
+        row for row in all_rows if not selected_image_id or row.get("image_id") == selected_image_id
+    ]
+
+    rows: list[dict[str, Any]] = []
+    for row in filtered_rows:
         normalized = dict(row)
         crop_path = Path(row["crop_path"])
         overlay_path = Path(row["overlay_path"])
-        normalized["crop_url"] = "/files/" + crop_path.relative_to(batch_dir).as_posix()
-        normalized["overlay_url"] = "/files/" + overlay_path.relative_to(batch_dir).as_posix()
+        normalized["crop_url"] = (
+            f"/files/{selected_batch_id}/" + crop_path.relative_to(batch_dir).as_posix()
+        )
+        normalized["overlay_url"] = (
+            f"/files/{selected_batch_id}/" + overlay_path.relative_to(batch_dir).as_posix()
+        )
         rows.append(normalized)
+
     return {
         "batch_dir": str(batch_dir),
+        "batches": batches,
+        "selected_batch_id": selected_batch_id,
+        "image_ids": image_ids,
+        "selected_image_id": selected_image_id,
         "rows": rows,
-        "summary": _summary(rows),
+        "summary": _summary(all_rows),
     }
 
 
-def _safe_file_path(batch_dir: Path, request_path: str) -> Path | None:
-    candidate = (batch_dir / request_path.removeprefix("/files/")).resolve()
+def _safe_file_path(batch_root: Path, request_path: str) -> Path | None:
+    relative = request_path.removeprefix("/files/")
+    candidate = (batch_root / relative).resolve()
     try:
-        candidate.relative_to(batch_dir.resolve())
+        candidate.relative_to(batch_root.resolve())
     except ValueError:
         return None
     return candidate if candidate.is_file() else None
@@ -504,17 +726,14 @@ def _safe_file_path(batch_dir: Path, request_path: str) -> Path | None:
 
 def create_server(batch_dir: Path, host: str = "127.0.0.1", port: int = 8765) -> ThreadingHTTPServer:
     resolved_batch_dir = batch_dir.resolve()
+    batch_root = resolved_batch_dir.parent
+    default_batch_id = resolved_batch_dir.name
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format: str, *args: Any) -> None:
             return
 
-        def _send_bytes(
-            self,
-            status: int,
-            body: bytes,
-            content_type: str,
-        ) -> None:
+        def _send_bytes(self, status: int, body: bytes, content_type: str) -> None:
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
@@ -533,11 +752,22 @@ def create_server(batch_dir: Path, host: str = "127.0.0.1", port: int = 8765) ->
             if parsed.path == "/":
                 self._send_bytes(200, HTML_PAGE.encode("utf-8"), "text/html; charset=utf-8")
                 return
+            if parsed.path == "/api/batches":
+                self._send_json({"batches": list_review_batches(batch_root)})
+                return
             if parsed.path == "/api/queue":
-                self._send_json(build_review_payload(resolved_batch_dir))
+                query = parse_qs(parsed.query)
+                batch_id = query.get("batch_id", [default_batch_id])[0]
+                image_id = query.get("image_id", [""])[0] or None
+                try:
+                    payload = build_review_payload(batch_root, batch_id, image_id)
+                except ValueError:
+                    self._send_json({"error": "batch not found"}, status=404)
+                    return
+                self._send_json(payload)
                 return
             if parsed.path.startswith("/files/"):
-                target = _safe_file_path(resolved_batch_dir, parsed.path)
+                target = _safe_file_path(batch_root, parsed.path)
                 if target is None:
                     self._send_json({"error": "file not found"}, status=404)
                     return
@@ -556,8 +786,13 @@ def create_server(batch_dir: Path, host: str = "127.0.0.1", port: int = 8765) ->
                 return
             length = int(self.headers.get("Content-Length", "0"))
             payload = json.loads(self.rfile.read(length) or b"{}")
+            batch_id = payload.get("batch_id", default_batch_id)
             rows = payload.get("rows", [])
-            save_review_queue(resolved_batch_dir, rows)
+            try:
+                save_review_queue(_batch_dir(batch_root, str(batch_id)), rows)
+            except ValueError:
+                self._send_json({"error": "batch not found"}, status=404)
+                return
             self._send_json({"ok": True, "summary": _summary(rows)})
 
     return ThreadingHTTPServer((host, port), Handler)
