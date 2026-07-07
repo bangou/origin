@@ -74,5 +74,6 @@ def test_build_review_batch_writes_queue_crops_and_overlay(tmp_path: Path) -> No
     assert summary["needs_review_count"] == 0
     assert rows[0]["review_status"] == "pending"
     assert rows[0]["candidate_score"] >= 0.65
+    assert rows[0]["action_hints"] == {}
     assert Path(rows[0]["crop_path"]).exists()
     assert Path(rows[0]["overlay_path"]).exists()

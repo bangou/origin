@@ -6,6 +6,7 @@ from typing import Any
 
 from PIL import Image, ImageDraw
 
+from vision_db.action_hints import compute_action_hints
 from vision_db.crop_extractor import detect_community_cards, extract_hero_crops
 from vision_db.jsonl_store import append_jsonl
 from vision_db.normalization import normalize_capture
@@ -76,6 +77,11 @@ def build_review_batch(
         )
         overlay_path = overlays_dir / f'{image_row["image_id"]}.png'
         _save_overlay(normalized.image, [crop.bbox for crop in crops], overlay_path)
+        action_hints = (
+            compute_action_hints(normalized.image, profile.button_rois)
+            if profile.button_rois
+            else {}
+        )
 
         used_labels: set[str] = set()
         for index, crop in enumerate(crops, start=1):
@@ -102,6 +108,7 @@ def build_review_batch(
                     "crop_path": str(crop_path),
                     "overlay_path": str(overlay_path),
                     "review_status": candidate.review_status,
+                    "action_hints": action_hints,
                 },
             )
             review_item_count += 1
