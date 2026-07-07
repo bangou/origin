@@ -1,0 +1,69 @@
+{
+  "profile_name": "wepoker_fullscreen_1920x1080_seed",
+  "window_title_hints": [
+    "WePoker",
+    "WePoker-H5"
+  ],
+  "reference_width": 1920,
+  "reference_height": 1080,
+  "bbox_tolerance_px": 5,
+  "hero_hand_roi": [
+    897,
+    862,
+    125,
+    94
+  ],
+  "hero_card_boxes": [
+    [
+      908,
+      872,
+      50,
+      73
+    ],
+    [
+      967,
+      872,
+      46,
+      73
+    ]
+  ],
+  "community_search_roi": [
+    805,
+    457,
+    318,
+    109
+  ],
+  "community_card_boxes": [
+    [
+      829,
+      476,
+      50,
+      73
+    ],
+    [
+      882,
+      476,
+      50,
+      73
+    ],
+    [
+      936,
+      476,
+      49,
+      73
+    ],
+    [
+      989,
+      476,
+      49,
+      73
+    ],
+    [
+      1042,
+      476,
+      50,
+      73
+    ]
+  ],
+  "button_rois": {}
+}
