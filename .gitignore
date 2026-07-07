@@ -5,6 +5,7 @@ __pycache__/
 
 screenshots/
 
+data/vision_db/
 data/vision_db/raw_full/
 data/vision_db/compressed_full/
 data/vision_db/exports/
